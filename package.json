@@ -1,0 +1,10 @@
+{
+  "name": "cards_against_humanity",
+  "version": "1.0.0",
+  "description": "cards against humanity",
+  "dependencies": {},
+  "server": {
+      "start": "node server.js"
+  },
+  "main": "server.js"
+}

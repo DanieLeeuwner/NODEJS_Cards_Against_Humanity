@@ -1,0 +1,674 @@
+<html>
+<head>
+    <title>Cards Against Humanity</title>
+<script type="text/javascript" src="/socket.io/socket.io.js"></script>
+<script type="text/javascript" src="/jquery-2.2.4.js"></script>
+<script>
+var socket = io();
+
+var servers = {};
+
+var black_card;
+var white_cards = [];
+var host = false;
+
+var pick_count = 1;
+var card_selections = [];
+var selected_card_count = 0;
+
+var submission_count = 0;
+
+var selected_cards = [];
+
+var current_view = 0;
+
+var game_title;
+
+var tmp_count; // temporary counter
+
+var username;
+
+var score = 0;
+
+socket.emit('get_games_from_server');
+socket.on('games_from_server', function (data) {
+    servers = JSON.parse(data);
+    $('.game_block, .host, .joiner').css('display','none');
+    $('#games div').remove();
+    $('#games').removeClass('hidden');
+    $('#games').addClass('games');
+    for (var s in servers) {
+        var div = document.createElement('div');
+        var title = document.createTextNode(servers[s]);
+        div.appendChild(title);
+        div.gameID = s;
+        div.addEventListener('click', function(e) {
+            selected_game(e);
+        });
+        document.getElementById('games').appendChild(div);
+    }
+});
+
+socket.on('game_ended', function() {
+    $('#end_game').css('display','block');
+    $('#end_title').html('You scored ' + score + ' point' + (score > 1 || score == 0 ? 's':''));
+});
+
+function start_new_game() {
+    $('#end_game').css('display','none');
+    socket.emit('get_games_from_server');
+}
+
+socket.on('init_questioneer', function(count) {
+    player_count = count;
+    score++;
+    $('#score').html('Score: ' + score);
+    display_questioneer_interface();
+});
+
+socket.on('init_player', function() {
+    $('#score').html('Score: ' + score);
+    display_player_interface();
+});
+
+socket.on('black_card_from_server', function(card) {
+    black_card = card;
+    // clear card holders
+    $('#card_holder div').remove();
+    display_card(card, true);
+    submission_count = 0;
+});
+
+socket.on('white_cards_from_server', function(cards) {
+    if (cards != undefined) {
+        var cards = JSON.parse(cards);
+        var index = 0;
+        for (c of cards) {
+            white_cards.push({ text: c, selected: false });
+        }
+    }
+    display_white_cards();
+});
+
+function display_white_cards() {
+    var tmp = [];
+    // clear all white cards
+    $('.card_white').remove();
+    tmp_count = -1;
+    for (var w of white_cards) {
+        if (w != null && w != undefined) {
+            if (host == false) {
+                display_card(w, false);
+            }
+        }
+    }
+}
+
+function display_questioneer_interface() {
+    $('#card_holder').css('display','none');
+    $('.arrow_left, .arrow_right').css('display','none');
+
+    $('#questioneer').css('display','block');
+
+    $("#questioneer_note").css('display','block');
+    $("#questioneer_card").css('display','block');
+    selected_cards = [];
+    host = true;
+    update_player_submission_count();
+}
+
+function update_player_submission_count() {
+    $('#questioneer_note').html('Waiting for other players<br>to make selections<br>' + submission_count + ' of ' + (player_count-1));
+}
+
+function display_player_interface() {
+    $('#card_holder').css('display','block');
+    $('#questioneer').css('display','none');
+    card_selections = [];
+    // display white cards
+    display_white_cards();
+}
+
+function display_card(card, black) {
+    tmp_count++;
+    var div = document.createElement('div');
+    //var title = document.createTextNode(card.text);
+    div.innerHTML = card.text;
+    div.index = tmp_count;
+    div.className = black ? "card_black" : "card_white";
+    div.id = black ? 'card_black' : 'card_' + tmp_count;
+
+    if (black == false) {
+        div.addEventListener('click', function(e) {
+            card_clicked(e);
+        });
+    } else {
+        var pick = document.createElement('div');
+        pick.className = 'pick';
+        pick_count = card.pick;
+        var title = document.createTextNode('Pick: ' + card.pick);
+        pick.appendChild(title);
+        div.appendChild(pick);
+    }
+    document.getElementById(host ? 'questioneer_card' : 'card_holder').appendChild(div);
+}
+
+socket.on('game_title', function(title) {
+    game_title = title;
+    $('.game_title').html(title);
+});
+
+function selected_game(e) {
+    document.getElementById('games').className = 'hidden';
+    score = 0;
+    socket.emit('join_server', e.srcElement.innerHTML);
+}
+
+blocked = false;
+
+socket.on('joined_server_as_host', function(un) {
+    username = un;
+    score -= 1;
+    $('#user').html(username);
+    $('.host').css('display', 'block');
+    $('.joiner').css('display','none');
+    host = true;
+    update_host_player_count(1);
+});
+
+var player_count;
+
+socket.on('update_usercount', function(count) {
+    update_host_player_count(count);
+    player_count = count;
+});
+
+socket.on('joined_server', function(un) {
+    username = un;
+    $('#user').html(username);
+    $('.joiner').css('display','block');
+    $('#joiner').html('Joined game as: ' + username + '<br/>Waiting for host to start game');
+});
+
+socket.on('system_error', function(msg) {
+    $('.joiner').css('display','block');
+    $('#joiner').html(msg);
+    blocked = true;
+});
+
+function update_host_player_count(count) {
+    $('#user_count').html('Joined game as: ' + username + '<br/>' + count + " player" + (count > 1 ? "s" : "") + " in lobby");
+}
+
+
+
+function card_clicked(e) {
+    if (host == true) return;
+    var clicked_card = e.srcElement;
+    if ($("#" + clicked_card.id).hasClass('toggled')) {
+        $("#" + clicked_card.id).removeClass('toggled');
+        var inserted_index = white_cards[clicked_card.index].selected_order;
+        card_selections = ArrayPop(card_selections, inserted_index);
+
+        selected_card_count--;
+        // remove card
+        white_cards[clicked_card.index].selected = false;
+        white_cards[clicked_card.index].selected_order = undefined;
+        for (var w_id in white_cards) {
+            var order = white_cards[w_id].selected_order;
+            if (order != undefined && order > inserted_index) {
+                order -= 1;
+            }
+            white_cards[w_id].selected_order = order;
+        }
+    } else {
+        $("#" + clicked_card.id).addClass('toggled');
+        card_selections = ArrayPush(card_selections, white_cards[clicked_card.index]);
+        selected_card_count++;
+        // add card
+        white_cards[clicked_card.index].selected = true;
+        white_cards[clicked_card.index].selected_order = selected_card_count - 1;
+    }
+    if (selected_card_count == pick_count) {
+        // enable button
+        $('#btn_player_submit').removeClass('disabled');
+    } else {
+        $('#btn_player_submit').addClass('disabled');
+    }
+}
+
+function ArrayPush(arr, value) {
+    var tmp = [];
+    for (var v of arr) {
+        if (v != null && v != undefined) {
+            tmp.push(v);
+        }
+    }
+    tmp.push(value);
+    return tmp;
+}
+
+function ArrayPop(arr, index) {
+    var tmp = [];
+    var i = -1;
+    for (var v of arr) {
+        if (v != null && v != undefined) {
+            i++;
+            if (i != index) {
+                tmp.push(v);
+            }
+        }
+    }
+    return tmp;
+}
+
+function start_game() {
+    socket.emit('start_game');
+}
+
+socket.on('game_started', function() {
+    if (blocked) return;
+    selected_card_count = 0;
+    refreshed = true;
+    $('#winner_title').css('display','none');
+
+    $('#game_title').html(game_title);
+    // clear all card holders
+    $('.card_holder div').remove();
+    // hide host and joiner screens
+    $('.host, .joiner').css('display','none');
+    $('.game_block').css('display','block');
+    $('#btn_player_submit').addClass('disabled');
+
+});
+
+socket.on('user_submitted_cards', function(cards) {
+    var tmp = JSON.parse(cards);
+    selected_cards.push(tmp);
+    submission_count++;
+    update_player_submission_count();
+    if (submission_count == player_count - 1) {
+        // allow host to make selection
+        $('#btn_player_submit').removeClass('disabled');
+        $('.arrow_right, .arrow_left').css('display','block');
+        current_view = 0;
+        display_current_view();
+    }
+})
+
+var countdown;
+var refreshed;
+
+socket.on('end_round', function(d) {
+    var winner = JSON.parse(d);
+    // hide all interfaces
+    $('#questioneer').css('display','none');
+    $('#card_holder').css('display','block');
+    $('#btn_player_submit').addClass('disabled');
+    $('.joiner').css('display','none');
+    $('.game_block').css('display','block');
+
+    $('#winner_title').css('display','block');
+    $('#winner_title').html('Winner: ' + winner.name);
+    // display winning cards
+    $('.card_holder div').remove();
+    host = false;
+    display_card(black_card, true);
+    for (var w of winner.cards) {
+        display_card(w, false);
+    }
+    // initiate countdown
+    refreshed = false;
+    countdown = 11;
+    perform_countdown();
+});
+
+function perform_countdown() {
+    if (refreshed == false) {
+        countdown--;
+        $('#game_title').html('Next round starts in: ' + countdown);
+        if (countdown > 0) window.setTimeout(perform_countdown, 1000);
+    }
+}
+
+function player_submit() {
+    if (!$('#btn_player_submit').hasClass('disabled')) {
+        if (host == true) {
+            // host has made answer selection
+            socket.emit('selected_user_response', JSON.stringify(selected_cards[current_view]))
+        } else {
+            // player has made card selection
+            selected_cards = {};
+            selected_cards.cards = [];
+            selected_card_count = 0;
+            var index = -1;
+            for (var w of white_cards) {
+                index++;
+                if (w.selected == true) {
+                    delete white_cards[index];
+                }
+            }
+            white_cards = cleanObject(white_cards);
+            card_selections = cleanObject(card_selections);
+            selected_cards.cards = card_selections;
+            socket.emit('submitting_selected_cards', JSON.stringify(selected_cards));
+            $('.game_block').css('display','none');
+            $('#joiner').html('Waiting for questioneer to select best answer');
+            $('.joiner').css('display','block');
+        }
+    }
+}
+
+function cleanObject(arr) {
+    var tmp = [];
+    for (var v in arr) {
+        if (v === null) continue;
+        if (v === undefined) continue;
+        tmp.push(arr[v]);
+    }
+    return tmp;
+}
+
+function display_current_view() {
+    // remove all white cards
+    $('#questioneer_card .card_white').remove();
+    $('#questioneer_note').html('Select the best suited answer<br/>Submission from: ' + selected_cards[current_view].name);
+    // display white cards
+    for (var w of selected_cards[current_view].cards) {
+        display_card(w, false);
+    }
+}
+
+function change_selection(v) {
+    if (current_view + +v >= 0 && current_view + +v < player_count - 1) {
+        current_view += +v;
+        display_current_view();
+    }
+}
+
+</script>
+<style>
+
+body {
+    font-family: arial;
+}
+
+.games {
+    width: 350px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.games div {
+    text-align: center;
+    font-size: 20px;
+    padding: 20px;
+    line-height: 20px;
+    border: 1px solid black;
+    background-color: white;
+    cursor: pointer;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.games div:hover {
+    background-color: #efefef;
+}
+
+.hidden {
+    display: none;
+}
+
+.game_title {
+    width: 100%;
+    position: fixed;
+    top: 0px;
+    left: 0px;
+    height: 30px;
+    text-align: center;
+    line-height: 30px;
+    font-size: 25px;
+    border-bottom: 2px solid black;
+    background-color: white;
+    z-index: 100;
+}
+
+.game_block {
+    display: none;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    position: absolute;
+    top: 0px;
+    left: 0px;
+}
+
+.card_holder, .questioneer {
+    width: 100%;
+    display: none;
+}
+
+.card_holder [class^='card_'] {
+    border-radius: 10px;
+    height: 250px;
+    width: 175px;
+    padding: 20px;
+    font-size: 20px;
+    box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: 50px;
+    margin-bottom: 10px;
+
+    z-index: 50;
+
+    position: relative;
+
+    -webkit-transition-duration: 0.5s;
+    -moz-transition-duration: 0.5s;
+    -o-transition-duration: 0.5s;
+    transition-duration: 0.5s;
+
+    -webkit-transition-property: -webkit-transform -webkit-translate;
+    -moz-transition-property: -moz-transform -moz-translate;
+    -o-transition-property: -o-transform -o-translate;
+    transition-property: transform translate;
+}
+
+[class^='arrow_']:hover {
+    color: #333;
+}
+
+[class^='arrow_'] {
+    cursor: pointer;
+    font-size: 60px;
+    height: 60px;
+    width: 60px;
+    position: fixed;
+    top: calc(50% - 15px);
+}
+
+.arrow_left {
+    left: 20px;
+    display: none;
+}
+
+.arrow_right {
+     left: calc(100% - 60px - 20px);
+     display: none;
+}
+
+.card_black {
+    background-color: black;
+    color: white;
+    position: relative;
+    z-index: 50;
+}
+
+
+.card_black .pick {
+    position: absolute;
+    top: calc(100% - 35px);
+}
+
+.card_white {
+    background-color: white;
+    color: black;
+}
+
+.toggled {
+    -webkit-transform:rotate(20deg);
+    -moz-transform:rotate(20deg);
+    -o-transform:rotate(20deg);
+    box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.4), 0 6px 20px 0 rgba(0, 0, 0, 0.3);
+}
+
+.game_footer {
+    width: 100%;
+    height: 125px;
+    position: fixed;
+    top: calc(100% - 100px);
+    left: 0px;
+    z-index: 100;
+    background-color: white;
+    border-top: 2px solid black;
+}
+
+.button {
+    border: 2px solid #ccc;
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: 15px;
+    margin-top: 15px;
+    padding: 20px;
+    z-index: 100;
+    width: 250px;
+    text-align: center;
+    line-height: 25px;
+    font-size: 25px;
+    cursor: pointer;
+}
+
+.button:hover {
+    background-color: #eee;
+}
+
+.disabled {
+    color: #eee;
+    background-color: #ddd;
+}
+
+.host, .joiner {
+    display: none;
+    z-index: 75;
+    width: 100%;
+    height: 100%;
+    background-color: #eee;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.joiner {
+    z-index: 150;
+}
+
+.user_note {
+    font-size: 25px;
+    margin-top: 100px;
+    width: 100%;
+    text-align: center;
+}
+
+#score {
+    font-size: 20px;
+    line-height: 95px;
+    padding-left: 20px;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#user {
+    font-size: 20px;
+    line-height: 95px;
+    padding-right: 20px;
+    position: absolute;
+    z-index: 50;
+    text-align: right;
+    top: 0;
+    width: calc(50% - 145px);
+    left: calc(50% + 125px);
+}
+
+#end_game {
+    width: 100%;
+    height: 100%;
+    position: fixed;
+    background-color: #eee;
+    display: none;
+    z-index: 200;
+    top: 0;
+    left: 0;
+}
+
+#end_game .button {
+    position: absolute;
+    top: 80%;
+    left: calc(50% - 125px);
+}
+
+#end_title {
+    color: black;
+    width: 100%;
+    height: auto;
+    position: absolute;
+    left: 0;
+    font-size: 25px;
+    top: 30%;
+    text-align: center;
+}
+
+#winner_title {
+    color: black;
+    width: 100%;
+    height: auto;
+    margin-top: 100px;
+    left: 0;
+    font-size: 25px;
+    text-align: center;
+}
+
+</style>
+</head>
+<body bgcolor="#eee">
+    <div id="end_game"><div id="end_title"></div><div class="button" onclick="start_new_game();">PLAY AGAIN</div></div>
+    <div class="games" id="games"></div>
+    <div class="game_block">
+        <div class="game_title" id="game_title"></div>
+        <div id="winner_title"></div>
+        <div class="card_holder" id="card_holder"></div>
+        <div class="questioneer" id="questioneer">
+            <div class="arrow_left" onclick="change_selection(-1)">&lt;</div>
+            <div class="arrow_right" onclick="change_selection(1)">&gt;</div>
+            <div class="user_note" id="questioneer_note"></div>
+            <div class="card_holder" id="questioneer_card"></div>
+        </div>
+        <div style="width: 100%; height: 125px"></div>
+        <div class="game_footer">
+            <div id="score"></div>
+            <div class="button disabled" id="btn_player_submit" onclick="player_submit()">SUBMIT</div>
+            <div id="user"></div>
+        </div>
+    </div>
+    <div class="host">
+        <div class="user_note" id="user_count"></div>
+        <div class="game_footer">
+            <div class="button" onclick="start_game()">START GAME</div>
+        </div>
+    </div>
+    <div class="joiner">
+        <div class="user_note" id="joiner"></div>
+    </div>
+</body>
+</html>
