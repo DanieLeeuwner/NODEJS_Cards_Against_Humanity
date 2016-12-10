@@ -1,1 +1,3 @@
-#Cards Against Humanity\n\nA Cards Against Humanity clone written in Node.js
+#Cards Against Humanity
+
+A Cards Against Humanity clone written in Node.js
